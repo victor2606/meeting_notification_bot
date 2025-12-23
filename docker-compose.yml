@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: event_bot_db
+    environment:
+      POSTGRES_USER: event_bot
+      POSTGRES_PASSWORD: event_bot_pass
+      POSTGRES_DB: event_bot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  bot:
+    build: .
+    container_name: event_bot
+    depends_on:
+      - postgres
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      DATABASE_URL: postgresql://event_bot:event_bot_pass@postgres:5432/event_bot
+      ADMIN_IDS: ${ADMIN_IDS}
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
