@@ -1,0 +1,26 @@
+name: Deploy to Mac Mini
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Pull latest code
+        run: |
+          cd ~/projects/meeting_notification_bot
+          git pull origin main
+
+      - name: Restart services
+        run: |
+          cd ~/projects/meeting_notification_bot
+          ~/.orbstack/bin/docker compose down
+          ~/.orbstack/bin/docker compose up -d --build
+
+      - name: Check status
+        run: |
+          sleep 5
+          ~/.orbstack/bin/docker compose ps
