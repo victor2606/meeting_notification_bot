@@ -13,3 +13,6 @@ ADMIN_IDS: list[int] = [
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN is not set in environment variables")
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL is not set in environment variables")

@@ -1,15 +1,19 @@
 """User handlers for the bot.
 
 Handlers:
-- cmd_start: /start command - creates user, shows welcome (line 39)
-- handle_events_button: "🗓 Мероприятия" button - shows events list (line 62)
-- handle_event_detail: Event detail callback - shows full event info (line 86)
-- handle_event_list: Back to events list callback (line 120)
-- handle_register: Registration callback - creates registration and reminders (line 152)
-- handle_cancel_registration: Cancel registration callback (line 191)
-- handle_calendar_choose: Calendar service selection (line 226)
-- handle_calendar_link: Send calendar link (Google/Yandex) (line 254)
-- handle_inline_share: Inline query for sharing events (line 287)
+- cmd_start: /start command - creates user, shows welcome (line 45)
+- handle_events_button: "🗓 Мероприятия" button - shows events list (line 86)
+- handle_settings_button: "⚙️ Настройки" button - shows notification settings (line 132)
+- handle_settings_toggle: Settings toggle callback - toggles category notifications (line 156)
+- handle_event_detail: Event detail callback - shows full event info (line 221)
+- handle_event_list: Back to events list callback (line 258)
+- handle_register: Registration callback - creates registration and reminders (line 286)
+- handle_cancel_registration: Cancel registration callback (line 343)
+- handle_calendar_choose: Calendar service selection (line 391)
+- handle_calendar_link: Send calendar link (Google/Yandex) (line 413)
+- handle_inline_share: Inline query for sharing events (line 445)
+- handle_reminder_confirm: 24h reminder confirm button handler (line 480)
+- handle_reminder_decline: 24h reminder decline button handler (line 499)
 """
 
 import logging
@@ -29,10 +33,13 @@ from keyboards.inline import (
     CalendarCallback,
     EventCallback,
     RegistrationCallback,
+    ReminderCallback,
+    SettingsCallback,
     calendar_kb,
     event_detail_kb,
     event_list_kb,
     registration_success_kb,
+    settings_kb,
 )
 from keyboards.reply import main_menu_kb
 from utils.calendar_links import google_calendar_url, yandex_calendar_url
@@ -99,6 +106,118 @@ async def handle_events_button(message: Message) -> None:
         reply_markup=event_list_kb(events),
         parse_mode="HTML",
     )
+
+
+# ============== Settings Handlers ==============
+
+
+SETTINGS_MESSAGE = """⚙️ <b>Настройки уведомлений</b>
+
+Выберите категории мероприятий, о которых вы хотите получать уведомления при их создании:
+
+{status_it} IT-мероприятия
+{status_sport} Спорт
+{status_books} Книжный клуб
+
+Нажмите на категорию, чтобы включить или выключить уведомления."""
+
+
+def _format_settings_status(user: dict) -> dict:
+    """Format notification status icons for settings message."""
+    return {
+        "status_it": "✅" if user["notify_it"] else "❌",
+        "status_sport": "✅" if user["notify_sport"] else "❌",
+        "status_books": "✅" if user["notify_books"] else "❌",
+    }
+
+
+@router.message(F.text == "⚙️ Настройки")
+async def handle_settings_button(message: Message) -> None:
+    """Handle settings button - show notification preferences."""
+    if message.from_user is None:
+        logger.error("Message without from_user in handle_settings_button")
+        return
+
+    user = await queries.get_user(message.from_user.id)
+
+    if user is None:
+        # Create user if not exists (edge case - user deleted and came back)
+        user = await queries.create_user(
+            telegram_id=message.from_user.id,
+            first_name=message.from_user.first_name,
+            username=message.from_user.username,
+        )
+
+    await message.answer(
+        SETTINGS_MESSAGE.format(**_format_settings_status(user)),
+        reply_markup=settings_kb(user),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(SettingsCallback.filter(F.action == "toggle"))
+async def handle_settings_toggle(
+    callback: CallbackQuery,
+    callback_data: SettingsCallback,
+) -> None:
+    """Handle settings toggle callback - toggle category notification."""
+    user = await queries.get_user(callback.from_user.id)
+
+    if user is None:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+
+    # Map category to database field
+    category_field_map = {
+        "it": "notify_it",
+        "sport": "notify_sport",
+        "books": "notify_books",
+    }
+
+    field = category_field_map.get(callback_data.category)
+    if field is None:
+        logger.error("Unknown settings category: %s", callback_data.category)
+        await callback.answer("Неизвестная категория", show_alert=True)
+        return
+
+    # Toggle the current value
+    current_value = user[field]
+    new_value = not current_value
+
+    # Update database
+    update_kwargs = {field: new_value}
+    updated_user = await queries.update_user_notifications(
+        callback.from_user.id, **update_kwargs
+    )
+
+    if updated_user is None:
+        logger.error(
+            "Failed to update user notifications: user_id=%d, field=%s",
+            callback.from_user.id,
+            field,
+        )
+        await callback.answer("Ошибка при сохранении", show_alert=True)
+        return
+
+    logger.info(
+        "User updated notification: user_id=%d, %s=%s",
+        callback.from_user.id,
+        field,
+        new_value,
+    )
+
+    # Update message with new keyboard
+    await callback.message.edit_text(
+        SETTINGS_MESSAGE.format(**_format_settings_status(updated_user)),
+        reply_markup=settings_kb(updated_user),
+        parse_mode="HTML",
+    )
+
+    # Show brief confirmation
+    category_names = {"it": "IT", "sport": "Спорт", "books": "Книги"}
+    category_name = category_names.get(callback_data.category, callback_data.category)
+    status = "включены" if new_value else "выключены"
+    await callback.answer(f"Уведомления «{category_name}» {status}")
 
 
 @router.callback_query(EventCallback.filter(F.action == "detail"))
@@ -355,3 +474,62 @@ async def handle_inline_share(inline_query: InlineQuery, bot: Bot) -> None:
     )
 
     await inline_query.answer(results=[result], cache_time=60)
+
+
+# ============== Reminder Callback Handlers ==============
+
+
+@router.callback_query(ReminderCallback.filter(F.action == "confirm"))
+async def handle_reminder_confirm(
+    callback: CallbackQuery,
+    callback_data: ReminderCallback,
+) -> None:
+    """Handle reminder confirmation - user confirms attendance."""
+    logger.info(
+        "User confirmed attendance: user_id=%d, registration_id=%d",
+        callback.from_user.id,
+        callback_data.registration_id,
+    )
+
+    await callback.message.edit_text(
+        f"{callback.message.text}\n\n"
+        "Отлично! Ждем вас на мероприятии!"
+    )
+    await callback.answer("Отлично! Ждем вас!")
+
+
+@router.callback_query(ReminderCallback.filter(F.action == "decline"))
+async def handle_reminder_decline(
+    callback: CallbackQuery,
+    callback_data: ReminderCallback,
+) -> None:
+    """Handle reminder decline - cancel registration and 15min reminder."""
+    registration_id = callback_data.registration_id
+
+    # Delete pending 15min reminder for this registration
+    await queries.delete_registration_reminders(registration_id)
+
+    # We need to get registration to find event_id for cancellation
+    # Since we have registration_id, we query via raw pool
+    from database.queries import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT user_id, event_id FROM registrations WHERE id = $1",
+            registration_id,
+        )
+
+    if row:
+        await queries.cancel_registration(row["user_id"], row["event_id"])
+        logger.info(
+            "User declined, registration cancelled: user_id=%d, event_id=%d",
+            row["user_id"],
+            row["event_id"],
+        )
+
+    await callback.message.edit_text(
+        f"{callback.message.text}\n\n"
+        "Хорошо, ваша запись отменена. Ждем вас на других мероприятиях!"
+    )
+    await callback.answer("Запись отменена")

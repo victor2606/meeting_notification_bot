@@ -8,32 +8,32 @@
 
 ## PROJECT_STRUCTURE
 ```
-event_bot/
-├── main.py
-├── config.py
-├── database/
-│   ├── __init__.py
-│   ├── models.py
-│   └── queries.py
-├── handlers/
-│   ├── __init__.py
-│   ├── user.py
-│   └── admin.py
-├── keyboards/
-│   ├── __init__.py
-│   ├── reply.py
-│   └── inline.py
-├── scheduler/
-│   ├── __init__.py
-│   └── reminders.py
-├── utils/
-│   ├── __init__.py
-│   ├── calendar_links.py
-│   └── formatters.py
-├── requirements.txt
-├── docker-compose.yml
-├── Dockerfile
-└── .env.example
+
+main.py
+config.py
+database/
+├── __init__.py
+├── models.py
+└── queries.py
+handlers/
+├── __init__.py
+├── user.py
+└── admin.py
+keyboards/
+├── __init__.py
+├── reply.py
+└── inline.py
+scheduler/
+├── __init__.py
+└── reminders.py
+utils/
+├── __init__.py
+├── calendar_links.py
+└── formatters.py
+requirements.txt
+docker-compose.yml
+Dockerfile
+.env.example
 ```
 
 ## DATABASE_SCHEMA
